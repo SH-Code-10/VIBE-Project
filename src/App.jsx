@@ -152,25 +152,47 @@ function App() {
 function Home({ data, entries, total, percent, statusText, statusClass, addIntake, removeIntake, setModal, lastDrink, remaining, goalSourceLabel }) {
   const [voiceStatus, setVoiceStatus] = useState('')
   const recognition = useRef(null)
-  useEffect(() => () => recognition.current?.abort(), [])
-  function startVoiceAdd() {
+  const listeningTimer = useRef(null)
+  useEffect(() => () => { clearTimeout(listeningTimer.current); recognition.current?.abort() }, [])
+  async function startVoiceAdd() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) { setVoiceStatus('Voice input is not supported in this browser. Try Chrome or Edge.'); return }
     recognition.current?.abort()
+    clearTimeout(listeningTimer.current)
+    // Ask for microphone access before starting recognition, so a denied or unavailable mic is clear.
+    if (navigator.mediaDevices?.getUserMedia) {
+      setVoiceStatus('Requesting microphone access…')
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+        stream.getTracks().forEach(track => track.stop())
+      } catch {
+        setVoiceStatus('Please allow microphone access in your browser, then try Voice add again.')
+        return
+      }
+    }
     const listener = new SpeechRecognition()
     listener.lang = 'en-US'
+    listener.continuous = true
     listener.interimResults = false
     listener.maxAlternatives = 1
-    listener.onstart = () => setVoiceStatus('Listening… say “okay add 200” or “add two hundred”.')
-    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? 'Please allow microphone access to use voice add.' : event.error === 'audio-capture' ? 'No microphone was found. Check that it is connected.' : 'I could not hear that. Please try again.')
+    listener.onstart = () => {
+      setVoiceStatus('Listening for 10 seconds… say “okay add 200”.')
+      listeningTimer.current = setTimeout(() => {
+        if (recognition.current === listener) { setVoiceStatus('No command heard. Tap Voice add, then speak clearly after “Listening” appears.'); listener.stop() }
+      }, 10_000)
+    }
+    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? 'Please allow microphone access to use voice add.' : event.error === 'audio-capture' ? 'No microphone was found. Check that it is connected.' : event.error === 'no-speech' ? 'No speech was detected. Speak after “Listening” appears and check your microphone is not muted.' : event.error === 'network' ? 'Voice recognition needs an internet connection. Please check your network.' : 'Voice input could not start. Please try again.')
     listener.onresult = event => {
-      const words = event.results[0][0].transcript
+      const result = event.results[event.resultIndex]
+      if (!result.isFinal) return
+      const words = result[0].transcript
       const amount = parseVoiceAmount(words)
       if (!amount) { setVoiceStatus(`Try “okay add 200” — heard: “${words}”.`); return }
       addIntake(amount)
       setVoiceStatus(`Added ${amount} ml by voice.`)
+      listener.stop()
     }
-    listener.onend = () => { recognition.current = null }
+    listener.onend = () => { clearTimeout(listeningTimer.current); recognition.current = null }
     recognition.current = listener
     try { listener.start() } catch { setVoiceStatus('Voice input is already starting. Please try again.') }
   }

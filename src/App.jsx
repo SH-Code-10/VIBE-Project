@@ -11,7 +11,7 @@ const loadData = () => {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY))
     if (!raw) return defaults
-    if (raw.settings && raw.settings.interval !== undefined) raw.settings.interval = Math.max(5, Number(raw.settings.interval) || 120)
+    if (raw.settings && raw.settings.interval !== undefined) raw.settings.interval = Math.max(1, Number(raw.settings.interval) || 120)
     return { ...defaults, ...raw }
   } catch { return defaults }
 }
@@ -41,11 +41,11 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = data.settings.dark ? 'dark' : 'light' }, [data.settings.dark])
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 2800); return () => clearTimeout(timer) }, [toast])
 
-  // Hydration reminder notifications (min 5 minutes).
+  // Hydration reminder notifications (min 1 minute for quick testing).
   useEffect(() => {
     const { reminders, interval } = data.settings
     if (!reminders) return
-    const safeInterval = Math.max(5, Number(interval) || 120)
+    const safeInterval = Math.max(1, Number(interval) || 120)
     const fire = () => {
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try { new Notification('💧 Time to hydrate!', { body: `Have a sip of water — ${safeInterval} minutes since your last reminder.`, tag: 'dailydrink-reminder' }) } catch {}
@@ -70,7 +70,7 @@ function App() {
   function resetToday() { setData(x => ({ ...x, intakes: x.intakes.filter(item => item.date !== today) })); setModal(null); setToast('Today’s entries have been cleared.') }
   function updateSettings(settings) {
     const safe = { ...settings }
-    if (safe.interval !== undefined) safe.interval = Math.max(5, Number(safe.interval) || 120)
+    if (safe.interval !== undefined) safe.interval = Math.max(1, Number(safe.interval) || 120)
     setData(x => ({ ...x, settings: { ...x.settings, ...safe } })); setToast('Settings saved.')
     // Browsers only allow the notification permission dialog during a direct user action.
     // This function is called by the reminder switch's change handler.
@@ -174,7 +174,7 @@ function Settings({ data, updateSettings, saveGoal, resetToday }) {
     <SettingCard title="👤 Profile"><label>Your name<input value={form.name} maxLength="40" placeholder="e.g. Alex" onChange={e => patch({ name: e.target.value })} /></label><label>Body weight (kg)<div className="input-action"><input type="number" min="1" max="300" value={form.weight} placeholder="e.g. 65" onChange={e => patch({ weight: e.target.value })} /><button onClick={suggest} disabled={suggestedGoal === null}>Apply recommendation</button></div></label>
       {showRecommendation && suggestedGoal !== null && <div className="recommendation-card"><strong>Recommended daily water</strong><p>{`${suggestedGoal.toLocaleString()} ml`}</p></div>}
       <p className="helper">The recommendation is calculated automatically from your weight and shown after you click the button.</p></SettingCard>
-    <SettingCard title="🔔 Reminders"><Switch label="Hydration reminders" checked={form.reminders} onChange={checked => patch({ reminders: checked })} />{form.reminders && <label>Repeat every<select value={form.interval} onChange={e => patch({ interval: Number(e.target.value) })}><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select></label>}<p className="helper">Minimum 5 minutes. Browser reminders work while this app is open.</p></SettingCard>
+    <SettingCard title="🔔 Reminders"><Switch label="Hydration reminders" checked={form.reminders} onChange={checked => patch({ reminders: checked })} />{form.reminders && <label>Repeat every<select value={form.interval} onChange={e => patch({ interval: Number(e.target.value) })}><option value="1">1 minute (test)</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option><option value="90">1.5 hours</option><option value="120">2 hours</option><option value="180">3 hours</option></select></label>}<p className="helper">Minimum 1 minute for testing. Browser reminders work while this app is open.</p></SettingCard>
     <SettingCard title="🎨 Appearance"><Switch label="Dark mode" checked={form.dark} onChange={checked => patch({ dark: checked })} /></SettingCard>
     <SettingCard title="⚠️ Danger zone"><button className="reset-button" onClick={resetToday}>Reset today’s data</button></SettingCard>
   </div>

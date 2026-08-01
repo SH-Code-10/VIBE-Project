@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 // The browser stores data under this single key, so no database is needed.
 const STORAGE_KEY = 'dailydrink-web-v1'
@@ -25,6 +25,7 @@ function App() {
   const [tab, setTab] = useState('home')
   const [modal, setModal] = useState(null)
   const [toast, setToast] = useState('')
+  const reminderAudio = useRef(null)
   const today = todayKey()
   const entries = data.intakes.filter(item => item.date === today).sort((a, b) => b.timestamp - a.timestamp)
   const total = entries.reduce((sum, item) => sum + item.amount, 0)
@@ -41,6 +42,34 @@ function App() {
   useEffect(() => { document.documentElement.dataset.theme = data.settings.dark ? 'dark' : 'light' }, [data.settings.dark])
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 2800); return () => clearTimeout(timer) }, [toast])
 
+  function prepareReminderSound() {
+    const AudioContext = window.AudioContext || window.webkitAudioContext
+    if (!AudioContext) return
+    if (!reminderAudio.current) reminderAudio.current = new AudioContext()
+    if (reminderAudio.current.state === 'suspended') reminderAudio.current.resume().catch(() => {})
+  }
+
+  function playReminderSound() {
+    try {
+      prepareReminderSound()
+      const context = reminderAudio.current
+      if (!context) return
+      const chime = () => [0, 0.3].forEach(offset => {
+        const oscillator = context.createOscillator()
+        const gain = context.createGain()
+        oscillator.frequency.value = 880
+        gain.gain.setValueAtTime(0.0001, context.currentTime + offset)
+        gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + offset + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + offset + 0.22)
+        oscillator.connect(gain).connect(context.destination)
+        oscillator.start(context.currentTime + offset)
+        oscillator.stop(context.currentTime + offset + 0.24)
+      })
+      if (context.state === 'suspended') context.resume().then(chime).catch(() => {})
+      else chime()
+    } catch {}
+  }
+
   // Hydration reminder notifications (min 1 minute for quick testing).
   useEffect(() => {
     const { reminders, interval } = data.settings
@@ -50,6 +79,7 @@ function App() {
       if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try { new Notification('💧 Time to hydrate!', { body: `Have a sip of water — ${safeInterval} minutes since your last reminder.`, tag: 'dailydrink-reminder' }) } catch {}
       }
+      playReminderSound()
       setToast('💧 Reminder: Time to drink water!')
     }
     const ms = safeInterval * 60 * 1000
@@ -74,6 +104,7 @@ function App() {
     setData(x => ({ ...x, settings: { ...x.settings, ...safe } })); setToast('Settings saved.')
     // Browsers only allow the notification permission dialog during a direct user action.
     // This function is called by the reminder switch's change handler.
+    if (safe.reminders === true && !data.settings.reminders) prepareReminderSound()
     if (safe.reminders === true && !data.settings.reminders && typeof Notification !== 'undefined' && Notification.permission === 'default') {
       Notification.requestPermission().then(permission => {
         setToast(permission === 'granted' ? 'Reminders enabled. Your first alert will appear in 5 minutes.' : 'Allow notifications in your browser to receive popup reminders.')
@@ -100,6 +131,31 @@ function App() {
 }
 
 function Home({ data, entries, total, percent, statusText, statusClass, addIntake, removeIntake, setModal, lastDrink, remaining, goalSourceLabel }) {
+  const [voiceStatus, setVoiceStatus] = useState('')
+  const recognition = useRef(null)
+  useEffect(() => () => recognition.current?.abort(), [])
+  function startVoiceAdd() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) { setVoiceStatus('Voice input is not supported in this browser. Try Chrome or Edge.'); return }
+    recognition.current?.abort()
+    const listener = new SpeechRecognition()
+    listener.lang = 'en-US'
+    listener.interimResults = false
+    listener.maxAlternatives = 1
+    listener.onstart = () => setVoiceStatus('Listening… say “okay add 200”.')
+    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' ? 'Please allow microphone access to use voice add.' : 'I could not hear that. Please try again.')
+    listener.onresult = event => {
+      const words = event.results[0][0].transcript
+      const match = words.match(/(?:okay\s+)?add\s+(\d{1,5})(?:\s*(?:ml|millilit(?:er|re)s?))?/i)
+      if (!match) { setVoiceStatus(`Try “okay add 200” — heard: “${words}”.`); return }
+      const amount = Number(match[1])
+      addIntake(amount)
+      setVoiceStatus(`Added ${amount} ml by voice.`)
+    }
+    listener.onend = () => { recognition.current = null }
+    recognition.current = listener
+    try { listener.start() } catch { setVoiceStatus('Voice input is already starting. Please try again.') }
+  }
   const name = data.settings.name.trim()
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'
@@ -114,7 +170,8 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
       <div className="home-metrics"><div><strong>{remaining.toLocaleString()} ml</strong><small>remaining</small></div><div><strong>{lastDrink ? timeLabel(lastDrink) : 'No drinks yet'}</strong><small>last sip</small></div><div><strong>{goalSourceLabel}</strong><small>goal type</small></div></div>
     </section>
     <section><div className="section-heading"><h2>Quick add</h2><button className="text-button" onClick={() => setModal('custom')}>Custom +</button></div>
-      <div className="quick-add">{QUICK_AMOUNTS.map((amount, index) => <button key={amount} onClick={() => addIntake(amount)}><span>{['☕','🥛','🥤','💧','🧴'][index]}</span>{amount} ml</button>)}</div>
+      <div className="quick-add">{QUICK_AMOUNTS.map((amount, index) => <button key={amount} onClick={() => addIntake(amount)}><span>{['☕','🥛','🥤','💧','🧴'][index]}</span>{amount} ml</button>)}<button className="voice-add" onClick={startVoiceAdd}><span>🎙️</span>Voice add</button></div>
+      {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
     </section>
     <section className="log-section"><div className="section-heading"><h2>Today’s log</h2><span>{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</span></div>
       {entries.length ? <ul className="intake-list">{entries.map(item => <li key={item.id}><span className="drop-icon">💧</span><div><b>{item.amount} ml</b><small>{timeLabel(item.timestamp)}</small></div><button aria-label={`Remove ${item.amount} ml entry`} onClick={() => removeIntake(item.id)}>×</button></li>)}</ul> : <div className="empty-state"><span>💧</span><p>No water logged yet. Start with a quick add!</p></div>}

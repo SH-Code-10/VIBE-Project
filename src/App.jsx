@@ -46,11 +46,8 @@ function App() {
     const { reminders, interval } = data.settings
     if (!reminders) return
     const safeInterval = Math.max(5, Number(interval) || 120)
-    if (typeof Notification === 'undefined') return
-    const ask = async () => { if (Notification.permission === 'default') try { await Notification.requestPermission() } catch {} }
-    ask()
     const fire = () => {
-      if (Notification.permission === 'granted') {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try { new Notification('💧 Time to hydrate!', { body: `Have a sip of water — ${safeInterval} minutes since your last reminder.`, tag: 'dailydrink-reminder' }) } catch {}
       }
       setToast('💧 Reminder: Time to drink water!')
@@ -75,6 +72,13 @@ function App() {
     const safe = { ...settings }
     if (safe.interval !== undefined) safe.interval = Math.max(5, Number(safe.interval) || 120)
     setData(x => ({ ...x, settings: { ...x.settings, ...safe } })); setToast('Settings saved.')
+    // Browsers only allow the notification permission dialog during a direct user action.
+    // This function is called by the reminder switch's change handler.
+    if (safe.reminders === true && !data.settings.reminders && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        setToast(permission === 'granted' ? 'Reminders enabled. Your first alert will appear in 5 minutes.' : 'Allow notifications in your browser to receive popup reminders.')
+      }).catch(() => setToast('Unable to request notification permission.'))
+    }
   }
 
   return <main className="app-shell">

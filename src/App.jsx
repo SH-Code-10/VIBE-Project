@@ -4,6 +4,25 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 const STORAGE_KEY = 'dailydrink-web-v1'
 const DAY = 86_400_000
 const QUICK_AMOUNTS = [150, 200, 350, 500, 750]
+const SPOKEN_NUMBERS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 }
+
+function parseVoiceAmount(transcript) {
+  const command = transcript.toLowerCase().match(/\b(?:okay\s+)?add\s+(.+)/)
+  if (!command) return null
+  const amountText = command[1].replace(/\b(?:ml|millilit(?:er|re)s?)\b.*$/, '').trim()
+  const digits = amountText.match(/^(\d{1,5})\b/)
+  if (digits) return Number(digits[1])
+  let total = 0; let current = 0; let found = false
+  for (const word of amountText.replace(/-/g, ' ').split(/\s+/)) {
+    if (word === 'and') continue
+    if (SPOKEN_NUMBERS[word] !== undefined) { current += SPOKEN_NUMBERS[word]; found = true; continue }
+    if (word === 'hundred') { current = (current || 1) * 100; found = true; continue }
+    if (word === 'thousand') { total += (current || 1) * 1000; current = 0; found = true; continue }
+    break
+  }
+  const amount = total + current
+  return found && amount > 0 ? amount : null
+}
 
 const todayKey = () => new Date().toISOString().slice(0, 10)
 const loadData = () => {
@@ -142,13 +161,12 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
     listener.lang = 'en-US'
     listener.interimResults = false
     listener.maxAlternatives = 1
-    listener.onstart = () => setVoiceStatus('Listening… say “okay add 200”.')
-    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' ? 'Please allow microphone access to use voice add.' : 'I could not hear that. Please try again.')
+    listener.onstart = () => setVoiceStatus('Listening… say “okay add 200” or “add two hundred”.')
+    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? 'Please allow microphone access to use voice add.' : event.error === 'audio-capture' ? 'No microphone was found. Check that it is connected.' : 'I could not hear that. Please try again.')
     listener.onresult = event => {
       const words = event.results[0][0].transcript
-      const match = words.match(/(?:okay\s+)?add\s+(\d{1,5})(?:\s*(?:ml|millilit(?:er|re)s?))?/i)
-      if (!match) { setVoiceStatus(`Try “okay add 200” — heard: “${words}”.`); return }
-      const amount = Number(match[1])
+      const amount = parseVoiceAmount(words)
+      if (!amount) { setVoiceStatus(`Try “okay add 200” — heard: “${words}”.`); return }
       addIntake(amount)
       setVoiceStatus(`Added ${amount} ml by voice.`)
     }

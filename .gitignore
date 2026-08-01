@@ -1,0 +1,9 @@
+# Installed packages and generated files
+node_modules/
+dist/
+
+# Local development files
+dev-server.log
+.env
+.env.local
+.DS_Store

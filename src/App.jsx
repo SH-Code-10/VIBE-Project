@@ -151,14 +151,17 @@ function App() {
 
 function Home({ data, entries, total, percent, statusText, statusClass, addIntake, removeIntake, setModal, lastDrink, remaining, goalSourceLabel }) {
   const [voiceStatus, setVoiceStatus] = useState('')
+  const [voiceFallback, setVoiceFallback] = useState(false)
+  const [typedCommand, setTypedCommand] = useState('')
   const recognition = useRef(null)
   const listeningTimer = useRef(null)
   useEffect(() => () => { clearTimeout(listeningTimer.current); recognition.current?.abort() }, [])
   async function startVoiceAdd() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) { setVoiceStatus('Voice input is not supported in this browser. Try Chrome or Edge.'); return }
+    if (!SpeechRecognition) { setVoiceStatus('Voice input is not supported in this browser. You can still enter the command below.'); setVoiceFallback(true); return }
     recognition.current?.abort()
     clearTimeout(listeningTimer.current)
+    setVoiceFallback(false)
     // Ask for microphone access before starting recognition, so a denied or unavailable mic is clear.
     if (navigator.mediaDevices?.getUserMedia) {
       setVoiceStatus('Requesting microphone access…')
@@ -166,7 +169,8 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
         const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
         stream.getTracks().forEach(track => track.stop())
       } catch {
-        setVoiceStatus('Please allow microphone access in your browser, then try Voice add again.')
+        setVoiceStatus('Please allow microphone access in your browser, or enter the command below.')
+        setVoiceFallback(true)
         return
       }
     }
@@ -181,7 +185,10 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
         if (recognition.current === listener) { setVoiceStatus('No command heard. Tap Voice add, then speak clearly after “Listening” appears.'); listener.stop() }
       }, 10_000)
     }
-    listener.onerror = event => setVoiceStatus(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? 'Please allow microphone access to use voice add.' : event.error === 'audio-capture' ? 'No microphone was found. Check that it is connected.' : event.error === 'no-speech' ? 'No speech was detected. Speak after “Listening” appears and check your microphone is not muted.' : event.error === 'network' ? 'Voice recognition needs an internet connection. Please check your network.' : 'Voice input could not start. Please try again.')
+    listener.onerror = event => {
+      if (event.error === 'network') { setVoiceStatus('Voice recognition is unavailable offline. You can still enter the same command below.'); setVoiceFallback(true); return }
+      setVoiceStatus(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? 'Please allow microphone access to use voice add.' : event.error === 'audio-capture' ? 'No microphone was found. Check that it is connected.' : event.error === 'no-speech' ? 'No speech was detected. Speak after “Listening” appears and check your microphone is not muted.' : 'Voice input could not start. Please try again.')
+    }
     listener.onresult = event => {
       const result = event.results[event.resultIndex]
       if (!result.isFinal) return
@@ -195,6 +202,14 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
     listener.onend = () => { clearTimeout(listeningTimer.current); recognition.current = null }
     recognition.current = listener
     try { listener.start() } catch { setVoiceStatus('Voice input is already starting. Please try again.') }
+  }
+  function submitTypedCommand(event) {
+    event.preventDefault()
+    const amount = parseVoiceAmount(typedCommand)
+    if (!amount) { setVoiceStatus('Enter a command such as “add 200” or “add two hundred”.'); return }
+    addIntake(amount)
+    setTypedCommand('')
+    setVoiceStatus(`Added ${amount} ml.`)
   }
   const name = data.settings.name.trim()
   const hour = new Date().getHours()
@@ -212,6 +227,7 @@ function Home({ data, entries, total, percent, statusText, statusClass, addIntak
     <section><div className="section-heading"><h2>Quick add</h2><button className="text-button" onClick={() => setModal('custom')}>Custom +</button></div>
       <div className="quick-add">{QUICK_AMOUNTS.map((amount, index) => <button key={amount} onClick={() => addIntake(amount)}><span>{['☕','🥛','🥤','💧','🧴'][index]}</span>{amount} ml</button>)}<button className="voice-add" onClick={startVoiceAdd}><span>🎙️</span>Voice add</button></div>
       {voiceStatus && <p className="voice-status" role="status">{voiceStatus}</p>}
+      {voiceFallback && <form className="voice-fallback" onSubmit={submitTypedCommand}><input value={typedCommand} onChange={event => setTypedCommand(event.target.value)} placeholder="Type: add 200" aria-label="Water command" /><button type="submit">Add</button></form>}
     </section>
     <section className="log-section"><div className="section-heading"><h2>Today’s log</h2><span>{entries.length} {entries.length === 1 ? 'entry' : 'entries'}</span></div>
       {entries.length ? <ul className="intake-list">{entries.map(item => <li key={item.id}><span className="drop-icon">💧</span><div><b>{item.amount} ml</b><small>{timeLabel(item.timestamp)}</small></div><button aria-label={`Remove ${item.amount} ml entry`} onClick={() => removeIntake(item.id)}>×</button></li>)}</ul> : <div className="empty-state"><span>💧</span><p>No water logged yet. Start with a quick add!</p></div>}
